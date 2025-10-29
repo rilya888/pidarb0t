@@ -39,17 +39,27 @@ class TelegramBotHandler:
         logger.info(f"Channel ID: {self.channel_id}")
         
         # Регистрируем обработчик через application для всех типов обновлений
-        # Создаем обработчик для channel_post через callback
+        # Обработчик поддерживает и каналы и группы
         async def all_updates_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Логируем ВСЕ обновления
             has_channel_post = update.channel_post is not None
             has_edited = update.edited_channel_post is not None
             has_message = update.message is not None
+            has_edited_message = update.edited_message is not None
             
-            logger.info(f"ALL UPDATES: channel_post={has_channel_post}, edited_channel_post={has_edited}, message={has_message}")
+            logger.info(f"ALL UPDATES: channel_post={has_channel_post}, message={has_message}, edited={has_edited}, edited_msg={has_edited_message}")
             
-            if update.channel_post:
-                logger.info(f"Processing channel_post from chat: {update.channel_post.chat.id if update.channel_post else 'None'}")
+            # Обрабатываем сообщения из группы
+            if update.message and update.message.chat.type in ['group', 'supergroup']:
+                logger.info(f"Processing message from group: {update.message.chat.id}")
+                await self.handle_channel_message(update, context)
+            # Обрабатываем сообщения из канала
+            elif update.channel_post:
+                logger.info(f"Processing channel_post from chat: {update.channel_post.chat.id}")
+                await self.handle_channel_message(update, context)
+            elif update.edited_message and update.edited_message.chat.type in ['group', 'supergroup']:
+                logger.info(f"Processing edited message from group")
+                update.message = update.edited_message
                 await self.handle_channel_message(update, context)
             elif update.edited_channel_post:
                 logger.info(f"Processing edited_channel_post")
@@ -69,20 +79,21 @@ class TelegramBotHandler:
         self.application.add_handler(AllUpdatesHandler(all_updates_handler))
     
     async def handle_channel_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработка сообщений из канала"""
+        """Обработка сообщений из группы или канала"""
         try:
-            message = update.channel_post
+            # Поддерживаем и сообщения из группы и из канала
+            message = update.message if update.message else update.channel_post
             if not message:
-                logger.warning("handle_channel_message called but channel_post is None")
+                logger.warning("handle_channel_message called but message is None")
                 return
             
-            # Проверяем, что это сообщение из нужного канала
+            # Проверяем, что это сообщение из нужной группы/канала
             chat_id = str(message.chat.id)
             channel_id_str = str(self.channel_id)
             logger.info(f"Received message from chat_id: {chat_id}, expected: {channel_id_str}")
             
             if chat_id != channel_id_str and channel_id_str != chat_id:
-                logger.debug(f"Message from different channel, skipping. Got: {chat_id}, Expected: {channel_id_str}")
+                logger.debug(f"Message from different chat, skipping. Got: {chat_id}, Expected: {channel_id_str}")
                 return
             
             # Получаем информацию об авторе сообщения
@@ -155,7 +166,7 @@ class TelegramBotHandler:
         await self.application.initialize()
         await self.application.start()
         await self.application.updater.start_polling(
-            allowed_updates=["channel_post", "edited_channel_post"]
+            allowed_updates=["channel_post", "edited_channel_post", "message", "edited_message"]
         )
         logger.info("Bot polling started")
     
