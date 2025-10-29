@@ -1,7 +1,7 @@
 from openai import OpenAI
 from loguru import logger
 import random
-from bot.config import OPENAI_API_KEY, OPENAI_MODEL, JOKE_PROMPT, MEME_PROMPT, COMMENT_PROMPT_TEMPLATE, STETHEM_QUOTES
+from bot.config import OPENAI_API_KEY, OPENAI_MODEL, JOKE_PROMPT, MEME_PROMPT, COMMENT_PROMPT_TEMPLATE, MENTION_PROMPT_TEMPLATE, STETHEM_QUOTES
 
 
 class ChatGPTClient:
@@ -84,4 +84,30 @@ class ChatGPTClient:
         except Exception as e:
             logger.error(f"Error generating comment: {e}")
             return "Ясно, понятно. Короче, решил я пофилософствовать тут с вами, интеллигентами..."
+    
+    async def generate_mention_response(self, message_text: str, username: str = "пользователь") -> str:
+        """Генерирует грубый ответ на обращение пользователя"""
+        try:
+            prompt = MENTION_PROMPT_TEMPLATE.format(
+                username=username,
+                message_text=message_text
+            )
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "Ты гопник-матершинник из плохого района."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.9,
+                max_tokens=150
+            )
+            
+            response_text = response.choices[0].message.content.strip()
+            logger.info(f"Generated mention response: {response_text[:50]}...")
+            return response_text
+            
+        except Exception as e:
+            logger.error(f"Error generating mention response: {e}")
+            return "Ясно, понятно. Короче, решил я тут пофилософствовать с вами, интеллигентами..."
 

@@ -1,4 +1,5 @@
 import time
+import asyncio
 from typing import List, Optional
 from loguru import logger
 from telegram import Update, Message
@@ -19,11 +20,16 @@ class TelegramBotHandler:
         self.chatgpt_client = ChatGPTClient()
         self.monitor = ChannelMonitor(activity_timeout=config.ACTIVITY_TIMEOUT)
         self.bot_id = None
+        self.bot_username = None
         self.channel_id = None
         
         # История последних сообщений для контекста
         self.recent_messages: List[str] = []
         self.max_context_messages = 3
+        
+        # Для защиты от спама - последнее время ответа на упоминание
+        self.last_mention_responses = {}  # {user_id: timestamp}
+        self.mention_cooldown = 30  # секунд между ответами одному пользователю
         
     async def initialize(self):
         """Инициализация бота"""
@@ -47,6 +53,7 @@ class TelegramBotHandler:
             logger.info("Проверка токена бота...")
             bot_info = await self.application.bot.get_me()
             self.bot_id = bot_info.id
+            self.bot_username = bot_info.username
             self.monitor.set_bot_id(self.bot_id)
             
             logger.info(f"Bot initialized: @{bot_info.username} (ID: {self.bot_id})")
@@ -100,6 +107,92 @@ class TelegramBotHandler:
         
         self.application.add_handler(AllUpdatesHandler(all_updates_handler))
     
+    def is_bot_mentioned(self, message: Message) -> bool:
+        """Проверяет, обращается ли пользователь к боту"""
+        if not message.text:
+            return False
+        
+        # Проверяем, не от бота ли сообщение
+        if message.from_user and message.from_user.id == self.bot_id:
+            return False
+        
+        text_lower = message.text.lower()
+        
+        # Проверяем упоминание через @username
+        if self.bot_username:
+            bot_mentions = [
+                f"@{self.bot_username}",
+                f"@{self.bot_username.lower()}",
+                f"@{(self.bot_username.lower())}",
+            ]
+            for mention in bot_mentions:
+                if mention in text_lower:
+                    logger.info(f"Bot mentioned via @username: {mention}")
+                    return True
+        
+        # Проверяем, является ли это ответом на сообщение бота
+        if message.reply_to_message:
+            reply_to = message.reply_to_message
+            # Проверяем, что ответ на сообщение от бота
+            if reply_to.from_user and reply_to.from_user.id == self.bot_id:
+                logger.info("Bot mentioned via reply to bot's message")
+                return True
+        
+        # Проверяем упоминание в entities (если есть)
+        if message.entities:
+            for entity in message.entities:
+                if entity.type == "mention" and self.bot_username:
+                    mention_text = message.text[entity.offset:entity.offset + entity.length].lower()
+                    if f"@{self.bot_username.lower()}" in mention_text:
+                        logger.info("Bot mentioned via entity")
+                        return True
+        
+        return False
+    
+    async def respond_to_mention(self, update: Update, message: Message):
+        """Отвечает на обращение к боту"""
+        try:
+            # Получаем информацию о пользователе
+            user_id = message.from_user.id if message.from_user else None
+            username = message.from_user.username if message.from_user and message.from_user.username else "пользователь"
+            first_name = message.from_user.first_name if message.from_user and message.from_user.first_name else "пользователь"
+            display_name = f"@{username}" if username != "пользователь" else first_name
+            
+            # Проверка на спам - не отвечаем слишком часто одному пользователю
+            current_time = time.time()
+            if user_id and user_id in self.last_mention_responses:
+                time_since_last = current_time - self.last_mention_responses[user_id]
+                if time_since_last < self.mention_cooldown:
+                    logger.debug(f"Skipping mention response - cooldown active ({time_since_last:.1f}s < {self.mention_cooldown}s)")
+                    return
+            
+            logger.info(f"Responding to mention from {display_name}: {message.text[:50]}")
+            
+            # Генерируем ответ
+            response_text = await self.chatgpt_client.generate_mention_response(
+                message_text=message.text,
+                username=display_name
+            )
+            
+            # Небольшая задержка для естественности
+            await asyncio.sleep(1)
+            
+            # Отправляем ответ как reply на исходное сообщение
+            await self.application.bot.send_message(
+                chat_id=message.chat.id,
+                text=response_text,
+                reply_to_message_id=message.message_id
+            )
+            
+            # Обновляем время последнего ответа
+            if user_id:
+                self.last_mention_responses[user_id] = current_time
+            
+            logger.success(f"Replied to mention: {response_text[:50]}...")
+            
+        except Exception as e:
+            logger.error(f"Error responding to mention: {e}")
+    
     async def handle_channel_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка сообщений из группы или канала"""
         try:
@@ -129,6 +222,13 @@ class TelegramBotHandler:
             if user_id is None:
                 user_id = message.chat.id  # Fallback
             
+            # ПРОВЕРКА УПОМИНАНИЯ БОТА - приоритетная функция
+            if self.is_bot_mentioned(message):
+                logger.info("Bot mentioned - responding immediately")
+                await self.respond_to_mention(update, message)
+                # Не продолжаем обычную логику - возвращаемся
+                return
+            
             # Обновляем мониторинг активности
             self.monitor.update_last_activity(user_id)
             
@@ -140,7 +240,7 @@ class TelegramBotHandler:
             
             logger.info(f"Message received. User: {user_id}, Text: {message.text[:50] if message.text else 'No text'}")
             
-            # Проверяем, должен ли бот ответить
+            # Проверяем, должен ли бот ответить (обычная логика обсуждения)
             if self.monitor.should_bot_respond(MESSAGE_THRESHOLD_MIN, MESSAGE_THRESHOLD_MAX):
                 await self.respond_to_conversation()
                 self.monitor.reset_counter()
