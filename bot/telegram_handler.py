@@ -27,16 +27,38 @@ class TelegramBotHandler:
         
     async def initialize(self):
         """Инициализация бота"""
+        # Проверяем наличие токена
+        if not self.config.BOT_TOKEN:
+            error_msg = "TELEGRAM_BOT_TOKEN не установлен! Проверьте переменные окружения на Railway."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        if self.config.BOT_TOKEN == "your_bot_token_here":
+            error_msg = "TELEGRAM_BOT_TOKEN не настроен! Установите реальный токен в переменных окружения Railway."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        logger.info("Создание приложения Telegram...")
         self.application = Application.builder().token(self.config.BOT_TOKEN).build()
         self.channel_id = self.config.CHANNEL_ID
         
         # Получаем информацию о боте
-        bot_info = await self.application.bot.get_me()
-        self.bot_id = bot_info.id
-        self.monitor.set_bot_id(self.bot_id)
-        
-        logger.info(f"Bot initialized: @{bot_info.username} (ID: {self.bot_id})")
-        logger.info(f"Channel ID: {self.channel_id}")
+        try:
+            logger.info("Проверка токена бота...")
+            bot_info = await self.application.bot.get_me()
+            self.bot_id = bot_info.id
+            self.monitor.set_bot_id(self.bot_id)
+            
+            logger.info(f"Bot initialized: @{bot_info.username} (ID: {self.bot_id})")
+            logger.info(f"Channel ID: {self.channel_id}")
+        except Exception as e:
+            error_msg = f"Ошибка авторизации бота: {e}\n"
+            error_msg += "Проверьте:\n"
+            error_msg += "1. TELEGRAM_BOT_TOKEN установлен в переменных окружения Railway\n"
+            error_msg += "2. Токен правильный и не истек\n"
+            error_msg += "3. Токен принадлежит боту, который не был удален"
+            logger.error(error_msg)
+            raise
         
         # Регистрируем обработчик через application для всех типов обновлений
         # Обработчик поддерживает и каналы и группы

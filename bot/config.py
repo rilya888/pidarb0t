@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from loguru import logger
 
 load_dotenv()
 
@@ -9,6 +10,43 @@ CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
 
 # OpenAI settings
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# Валидация обязательных переменных окружения
+def validate_config():
+    """Проверяет наличие всех обязательных переменных окружения"""
+    errors = []
+    
+    if not BOT_TOKEN:
+        errors.append("TELEGRAM_BOT_TOKEN не установлен")
+    elif BOT_TOKEN == "your_bot_token_here":
+        errors.append("TELEGRAM_BOT_TOKEN не настроен (используется значение по умолчанию)")
+    
+    if not CHANNEL_ID:
+        errors.append("TELEGRAM_CHANNEL_ID не установлен")
+    elif CHANNEL_ID == "your_channel_id_here":
+        errors.append("TELEGRAM_CHANNEL_ID не настроен (используется значение по умолчанию)")
+    
+    if not OPENAI_API_KEY:
+        errors.append("OPENAI_API_KEY не установлен")
+    elif OPENAI_API_KEY == "your_openai_key_here":
+        errors.append("OPENAI_API_KEY не настроен (используется значение по умолчанию)")
+    
+    if errors:
+        error_msg = "Ошибки конфигурации:\n" + "\n".join(f"  - {e}" for e in errors)
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+    
+    logger.info("Конфигурация валидирована успешно")
+    logger.debug(f"BOT_TOKEN: {'*' * 10 if BOT_TOKEN else 'НЕ УСТАНОВЛЕН'}")
+    logger.debug(f"CHANNEL_ID: {CHANNEL_ID}")
+    logger.debug(f"OPENAI_API_KEY: {'*' * 10 if OPENAI_API_KEY else 'НЕ УСТАНОВЛЕН'}")
+
+# Выполняем валидацию при импорте
+try:
+    validate_config()
+except ValueError:
+    # Не прерываем выполнение, но логируем ошибку
+    pass
 
 # Bot behavior settings
 MESSAGE_THRESHOLD_MIN = 5  # Минимальное количество сообщений для ответа
