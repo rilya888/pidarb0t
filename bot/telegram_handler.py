@@ -174,7 +174,22 @@ class TelegramBotHandler:
         """Останавливает бота"""
         logger.info("Stopping bot...")
         if self.application:
-            await self.application.stop()
-            await self.application.shutdown()
+            try:
+                # Проверяем, запущено ли приложение
+                if hasattr(self.application, 'running') and self.application.running:
+                    await self.application.stop()
+                    await self.application.shutdown()
+                else:
+                    # Если приложение не запущено, просто выполняем shutdown
+                    await self.application.shutdown()
+            except RuntimeError as e:
+                # Если приложение уже остановлено, просто продолжаем
+                logger.debug(f"Application already stopped: {e}")
+                try:
+                    await self.application.shutdown()
+                except Exception as e2:
+                    logger.debug(f"Error during shutdown: {e2}")
+            except Exception as e:
+                logger.error(f"Error stopping application: {e}")
         logger.info("Bot stopped")
 

@@ -37,11 +37,20 @@ class BotApplication:
         """Запускает бота"""
         try:
             await self.initialize()
-            await self.telegram_handler.start_polling()
+            
+            # Создаем задачу для polling
+            polling_task = asyncio.create_task(self.telegram_handler.start_polling())
             
             # Ждем сигнал остановки
             while self.running:
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.5)
+            
+            # Отменяем polling при остановке
+            polling_task.cancel()
+            try:
+                await polling_task
+            except asyncio.CancelledError:
+                logger.info("Polling task cancelled")
                 
         except KeyboardInterrupt:
             logger.info("Received keyboard interrupt")
